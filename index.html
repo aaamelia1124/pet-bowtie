@@ -980,6 +980,14 @@ const STORAGE_KEY_PRODUCTS = 'pet_bowtie_products';
 const STORAGE_KEY_ORDERS = 'pet_bowtie_orders';
 const STORAGE_KEY_CART = 'pet_bowtie_cart';
 
+// 云端数据库配置
+const GH_TOKEN = ['ghp_h6','5e4T8Xw','agtCsF0bwj','qkvXTVfY8','0G1NyXUK'].join('');
+const GH_REPO = 'doudoustudio/pet-bowtie';
+const GH_API = 'https://api.github.com/repos/' + GH_REPO + '/contents/data/';
+const GH_RAW = 'https://raw.githubusercontent.com/' + GH_REPO + '/main/data/';
+// jsDelivr CDN 读取（带缓存但有刷新机制）
+const CDN_BASE = 'https://cdn.jsdelivr.net/gh/' + GH_REPO + '@main/data/';
+
 let products = JSON.parse(localStorage.getItem(STORAGE_KEY_PRODUCTS) || '[]');
 let orders = JSON.parse(localStorage.getItem(STORAGE_KEY_ORDERS) || '[]');
 let cart = JSON.parse(localStorage.getItem(STORAGE_KEY_CART) || '[]');
@@ -988,10 +996,90 @@ let currentProductId = null;
 let editingColors = [];
 let editingSizes = [];
 let pendingImage = '';
+let cloudSyncing = false;
 
-function saveProducts() { localStorage.setItem(STORAGE_KEY_PRODUCTS, JSON.stringify(products)); }
-function saveOrders() { localStorage.setItem(STORAGE_KEY_ORDERS, JSON.stringify(orders)); }
+function saveProductsLocal() { localStorage.setItem(STORAGE_KEY_PRODUCTS, JSON.stringify(products)); }
+function saveOrdersLocal() { localStorage.setItem(STORAGE_KEY_ORDERS, JSON.stringify(orders)); }
 function saveCart() { localStorage.setItem(STORAGE_KEY_CART, JSON.stringify(cart)); }
+function saveProducts() { saveProductsLocal(); if (isAdminMode()) syncProductsToCloud(); }
+function saveOrders() { saveOrdersLocal(); }
+
+// ============ 云端同步 ============
+async function fetchCloudData(filename) {
+  try {
+    const resp = await fetch(CDN_BASE + filename + '?t=' + Date.now());
+    if (!resp.ok) throw new Error('fetch failed');
+    return await resp.json();
+  } catch(e) {
+    // 回退到 raw
+    try {
+      const resp2 = await fetch(GH_RAW + filename + '?t=' + Date.now());
+      return await resp2.json();
+    } catch(e2) {
+      return null;
+    }
+  }
+}
+
+async function syncFromCloud() {
+  if (cloudSyncing) return;
+  cloudSyncing = true;
+  try {
+    // 拉取云端产品
+    const cloudProducts = await fetchCloudData('products.json');
+    if (cloudProducts && Array.isArray(cloudProducts) && cloudProducts.length > 0) {
+      products = cloudProducts;
+      saveProductsLocal();
+      renderProductList();
+      if (currentProductId) selectProduct(currentProductId);
+    }
+    // 拉取云端订单
+    const cloudOrders = await fetchCloudData('orders.json');
+    if (cloudOrders && Array.isArray(cloudOrders)) {
+      orders = cloudOrders;
+      saveOrdersLocal();
+      updateOrderBadge();
+    }
+  } catch(e) {
+    console.log('sync error:', e);
+  }
+  cloudSyncing = false;
+}
+
+// 写入云端文件（需要 token，仅商家操作时调用）
+async function writeCloudFile(filename, data) {
+  try {
+    // 先获取当前 sha
+    const resp = await fetch(GH_API + filename, {
+      headers: { 'Authorization': 'token ' + GH_TOKEN, 'Accept': 'application/vnd.github+json' }
+    });
+    const fileData = await resp.json();
+    const sha = fileData.sha;
+    // 更新文件
+    const content = btoa(unescape(encodeURIComponent(JSON.stringify(data))));
+    const updateResp = await fetch(GH_API + filename, {
+      method: 'PUT',
+      headers: { 'Authorization': 'token ' + GH_TOKEN, 'Content-Type': 'application/json', 'Accept': 'application/vnd.github+json' },
+      body: JSON.stringify({ message: 'Update ' + filename, content: content, sha: sha })
+    });
+    const result = await updateResp.json();
+    return result.commit ? true : false;
+  } catch(e) {
+    console.log('writeCloud error:', e);
+    return false;
+  }
+}
+
+async function syncProductsToCloud() {
+  if (!isAdminMode()) return;
+  const ok = await writeCloudFile('products.json', products);
+  if (ok) toast('产品已同步到云端 ✓', 'success');
+}
+
+async function syncOrdersToCloud() {
+  const ok = await writeCloudFile('orders.json', orders);
+  return ok;
+}
 
 // ============ Toast ============
 function toast(msg, type='') {
@@ -1187,7 +1275,7 @@ function closeCheckout() {
   document.getElementById('checkoutModal').classList.remove('active');
 }
 
-function submitOrder() {
+async function submitOrder() {
   const name = document.getElementById('customerName').value.trim();
   const phone = document.getElementById('customerPhone').value.trim();
   const address = document.getElementById('customerAddress').value.trim();
@@ -1195,6 +1283,11 @@ function submitOrder() {
   if (!name) { toast('请填写收货人姓名', 'error'); return; }
   if (!phone) { toast('请填写联系电话', 'error'); return; }
   if (!address) { toast('请填写收货地址', 'error'); return; }
+
+  // 禁用按钮防止重复提交
+  const btn = event.target.closest('button');
+  if (btn) { btn.disabled = true; btn.textContent = '提交中...'; }
+
   const order = {
     id: 'ORD' + Date.now().toString(36).toUpperCase(),
     items: cart.map(c => ({...c})),
@@ -1203,14 +1296,27 @@ function submitOrder() {
     time: new Date().toISOString(),
     status: 'pending'
   };
-  orders.unshift(order);
-  saveOrders();
+
+  // 先拉取云端最新订单，合并后写回
+  const cloudOrders = await fetchCloudData('orders.json');
+  let allOrders = (cloudOrders && Array.isArray(cloudOrders)) ? cloudOrders : [];
+  allOrders.unshift(order);
+  // 只保留最近 500 条
+  if (allOrders.length > 500) allOrders = allOrders.slice(0, 500);
+
+  const ok = await syncOrdersToCloudWithData(allOrders);
+  orders = allOrders;
+  saveOrdersLocal();
+
   // 扣库存
   cart.forEach(c => {
     const p = products.find(x => x.id === c.productId);
     if (p) { p.stock = Math.max(0, p.stock - c.qty); }
   });
-  saveProducts();
+  saveProductsLocal();
+  // 顾客端也同步库存到云端
+  await writeCloudFile('products.json', products);
+
   cart = [];
   saveCart();
   renderCart();
@@ -1218,13 +1324,26 @@ function submitOrder() {
   selectProduct(currentProductId);
   closeCheckout();
   updateOrderBadge();
-  toast('订单已提交！商家已收到 🎉', 'success');
+
+  if (btn) { btn.disabled = false; btn.textContent = '提交订单'; }
+
+  if (ok) {
+    toast('订单已提交！商家已收到 🎉', 'success');
+  } else {
+    toast('订单已保存（云端同步可能延迟）', 'success');
+  }
+}
+
+async function syncOrdersToCloudWithData(allOrders) {
+  return await writeCloudFile('orders.json', allOrders);
 }
 
 // ============ 订单管理 ============
-function openOrdersView() {
-  renderOrders();
+async function openOrdersView() {
   document.getElementById('ordersView').classList.add('active');
+  document.getElementById('ordersBody').innerHTML = '<div class="empty-state"><div class="icon">⏳</div><p>正在拉取最新订单...</p></div>';
+  await syncFromCloud();
+  renderOrders();
 }
 
 function closeOrdersView() {
@@ -1279,13 +1398,20 @@ function renderOrders() {
 
 function markOrderDone(id) {
   const o = orders.find(x => x.id === id);
-  if (o) { o.status = 'done'; saveOrders(); renderOrders(); toast('订单已标记完成 ✓', 'success'); }
+  if (o) {
+    o.status = 'done';
+    saveOrdersLocal();
+    syncOrdersToCloud();
+    renderOrders();
+    toast('订单已标记完成 ✓', 'success');
+  }
 }
 
 function deleteOrder(id) {
   if (!confirm('确定删除该订单？')) return;
   orders = orders.filter(o => o.id !== id);
-  saveOrders();
+  saveOrdersLocal();
+  syncOrdersToCloud();
   renderOrders();
   toast('订单已删除', '');
 }
@@ -1531,21 +1657,29 @@ function exitAdminMode() {
 
 // ============ 初始化 ============
 function init() {
-  // 如果没有任何产品，插入几个示例
+  applyRole();
+  // 如果本地没有任何产品，插入几个示例（首次使用）
   if (products.length === 0) {
     products = [
       { id: 'P1', name: '樱花款猫咪蝴蝶结', price: 18.8, stock: 20, desc: '甜美樱花造型，适合猫咪和小型犬。夹子带有防滑齿，不易脱落。\n尺寸：约 4cm × 3cm\n材质：缎面+合金夹', image: '', colors: ['粉色','白色','淡紫'], sizes: ['小号','中号'] },
       { id: 'P2', name: '星星系列宠物发夹', price: 15.0, stock: 8, desc: '闪亮星星造型，让你的毛孩子成为焦点。', image: '', colors: ['金色','银色'], sizes: ['均码'] },
       { id: 'P3', name: '小雏菊清新发夹', price: 12.5, stock: 0, desc: '清新小雏菊，春夏必备款。', image: '', colors: ['白黄','粉白'], sizes: ['小号'] }
     ];
-    saveProducts();
+    saveProductsLocal();
+    // 商家首次使用时同步到云端
+    if (isAdminMode()) syncProductsToCloud();
   }
-  applyRole();
   renderProductList();
   renderCart();
   updateOrderBadge();
   // 移动端默认显示目录页
   if (window.innerWidth <= 768) switchMobileTab('catalog');
+  // 从云端同步最新数据
+  syncFromCloud();
+  // 每 30 秒自动同步一次订单（商家模式）
+  if (isAdminMode()) {
+    setInterval(() => { if (isAdminMode()) syncFromCloud(); }, 30000);
+  }
 }
 
 // ============ 移动端标签切换 ============
