@@ -737,6 +737,12 @@
     /* 在移动端隐藏顶部的新增按钮，放到产品列表里 */
     .topbar-actions .btn-primary { display: none; }
     .sidebar-header .btn-icon { display: flex; }
+    /* 移动端编辑/删除按钮始终显示 */
+    .product-item .edit-actions { display: flex; }
+    .product-item .edit-actions button {
+      width: 28px; height: 28px;
+      font-size: 13px;
+    }
   }
 </style>
 </head>
