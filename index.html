@@ -863,8 +863,8 @@
           <label>价格（元）</label>
           <input type="number" id="productPrice" placeholder="0.00" step="0.01" min="0">
         </div>
-        <div class="form-group">
-          <label>库存数量</label>
+        <div class="form-group" id="totalStockGroup">
+          <label>库存数量（无颜色/尺寸时用）</label>
           <input type="number" id="productStock" placeholder="0" min="0">
         </div>
       </div>
@@ -879,6 +879,10 @@
         <div class="tag-input-wrap" id="sizeTags">
           <input type="text" class="tag-input" placeholder="输入尺寸后回车" onkeydown="handleTagKeydown(event,'size')">
         </div>
+      </div>
+      <div class="form-group" id="skuStockGroup" style="display:none;">
+        <label>SKU 库存（按颜色×尺寸组合）</label>
+        <div id="skuStockTable" style="display:grid;gap:8px;"></div>
       </div>
       <div class="form-group">
         <label>详细描述</label>
@@ -1005,13 +1009,20 @@ function saveProducts() { saveProductsLocal(); if (isAdminMode()) syncProductsTo
 function saveOrders() { saveOrdersLocal(); }
 
 // ============ 云端同步 ============
+// 用 GitHub API 读取（带 token，可绕过 CDN 缓存）
 async function fetchCloudData(filename) {
   try {
-    const resp = await fetch(CDN_BASE + filename + '?t=' + Date.now());
-    if (!resp.ok) throw new Error('fetch failed');
-    return await resp.json();
+    const resp = await fetch(GH_API + filename, {
+      headers: {
+        'Authorization': 'token ' + GH_TOKEN,
+        'Accept': 'application/vnd.github.raw+json'
+      }
+    });
+    if (!resp.ok) throw new Error('api fetch failed: ' + resp.status);
+    const text = await resp.text();
+    return JSON.parse(text);
   } catch(e) {
-    // 回退到 raw
+    // 回退到 raw.githubusercontent（加时间戳防缓存）
     try {
       const resp2 = await fetch(GH_RAW + filename + '?t=' + Date.now());
       return await resp2.json();
@@ -1097,8 +1108,9 @@ function renderProductList() {
     return;
   }
   list.innerHTML = products.map(p => {
-    const stockClass = p.stock <= 0 ? 'out' : p.stock <= 5 ? 'low' : '';
-    const stockText = p.stock <= 0 ? '缺货' : `库存${p.stock}`;
+    const totalStock = getTotalStock(p);
+    const stockClass = totalStock <= 0 ? 'out' : totalStock <= 5 ? 'low' : '';
+    const stockText = totalStock <= 0 ? '缺货' : `库存${totalStock}`;
     return `
       <div class="product-item ${p.id === currentProductId ? 'active' : ''}" onclick="selectProduct('${p.id}')">
         <img src="${p.image || '🐾'}" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 44 44%22><rect fill=%22%23f7f5f2%22 width=%2244%22 height=%2244%22/><text x=%2211%22 y=%2230%22 font-size=%2220%22>🐾</text></svg>'">
@@ -1127,7 +1139,9 @@ function selectProduct(id) {
   const detail = document.getElementById('productDetail');
   const colors = p.colors && p.colors.length ? p.colors : [];
   const sizes = p.sizes && p.sizes.length ? p.sizes : [];
-  const outOfStock = p.stock <= 0;
+  const hasSku = colors.length > 0 || sizes.length > 0;
+  const totalStock = getTotalStock(p);
+  const outOfStock = totalStock <= 0;
   detail.innerHTML = `
     <div class="product-detail">
       <div class="image-wrap">
@@ -1158,16 +1172,54 @@ function selectProduct(id) {
             <input type="number" id="detailQty" value="1" min="1" ${outOfStock?'disabled':''}>
             <button onclick="changeQty(1)">+</button>
           </div>
-          <span style="font-size:12px;color:var(--muted);">${outOfStock ? '⚠️ 暂时缺货' : `剩余 ${p.stock} 件`}</span>
+          <span style="font-size:12px;color:var(--muted);" id="stockInfo">${outOfStock ? '⚠️ 暂时缺货' : `剩余 ${totalStock} 件`}</span>
         </div>
         <div class="add-cart-bar">
-          <button class="btn btn-primary" onclick="addToCart()" ${outOfStock?'disabled':''}>
+          <button class="btn btn-primary" id="addCartBtn" onclick="addToCart()" ${outOfStock?'disabled':''}>
             ${outOfStock ? '已缺货' : '🛒 加入购物车'}
           </button>
         </div>
       </div>
     </div>
   `;
+  // 如果有 SKU，选择时动态更新库存显示
+  if (hasSku) {
+    document.querySelectorAll('.sku-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        setTimeout(updateDetailStock, 50);
+      });
+    });
+  }
+}
+
+// 根据选中的颜色/尺寸更新详情页库存显示
+function updateDetailStock() {
+  const p = products.find(x => x.id === currentProductId);
+  if (!p) return;
+  const colorSel = document.querySelector('.sku-chip[data-type="color"].selected');
+  const sizeSel = document.querySelector('.sku-chip[data-type="size"].selected');
+  const color = colorSel ? colorSel.dataset.val : '';
+  const size = sizeSel ? sizeSel.dataset.val : '';
+  const hasSku = (p.colors && p.colors.length > 0) || (p.sizes && p.sizes.length > 0);
+  if (!hasSku) return;
+  const skuStock = getSkuStock(p, color, size);
+  const stockInfo = document.getElementById('stockInfo');
+  const addCartBtn = document.getElementById('addCartBtn');
+  if (stockInfo) {
+    stockInfo.textContent = skuStock <= 0 ? '⚠️ 该规格缺货' : `剩余 ${skuStock} 件`;
+  }
+  if (addCartBtn) {
+    if (skuStock <= 0) {
+      addCartBtn.disabled = true;
+      addCartBtn.textContent = '已缺货';
+    } else {
+      addCartBtn.disabled = false;
+      addCartBtn.textContent = '🛒 加入购物车';
+    }
+  }
+  // 重置数量
+  const qtyInput = document.getElementById('detailQty');
+  if (qtyInput) qtyInput.value = 1;
 }
 
 function selectSku(el) {
@@ -1179,8 +1231,15 @@ function selectSku(el) {
 function changeQty(delta) {
   const input = document.getElementById('detailQty');
   const p = products.find(x => x.id === currentProductId);
+  if (!p) return;
+  const colorSel = document.querySelector('.sku-chip[data-type="color"].selected');
+  const sizeSel = document.querySelector('.sku-chip[data-type="size"].selected');
+  const color = colorSel ? colorSel.dataset.val : '';
+  const size = sizeSel ? sizeSel.dataset.val : '';
+  const hasSku = (p.colors && p.colors.length > 0) || (p.sizes && p.sizes.length > 0);
+  const maxStock = hasSku ? getSkuStock(p, color, size) : (p.stock || 0);
   let val = parseInt(input.value) || 1;
-  val = Math.max(1, Math.min(val + delta, p ? p.stock : 99));
+  val = Math.max(1, Math.min(val + delta, maxStock));
   input.value = val;
 }
 
@@ -1188,17 +1247,25 @@ function changeQty(delta) {
 function addToCart() {
   const p = products.find(x => x.id === currentProductId);
   if (!p) return;
-  if (p.stock <= 0) { toast('该产品已缺货', 'error'); return; }
-  const qty = parseInt(document.getElementById('detailQty').value) || 1;
-  if (qty > p.stock) { toast(`库存不足，仅剩 ${p.stock} 件`, 'error'); return; }
   const colorSel = document.querySelector('.sku-chip[data-type="color"].selected');
   const sizeSel = document.querySelector('.sku-chip[data-type="size"].selected');
   const color = colorSel ? colorSel.dataset.val : '';
   const size = sizeSel ? sizeSel.dataset.val : '';
+  const hasSku = (p.colors && p.colors.length > 0) || (p.sizes && p.sizes.length > 0);
+  // 按 SKU 检查库存
+  let availableStock;
+  if (hasSku) {
+    availableStock = getSkuStock(p, color, size);
+  } else {
+    availableStock = p.stock || 0;
+  }
+  if (availableStock <= 0) { toast('该规格已缺货', 'error'); return; }
+  const qty = parseInt(document.getElementById('detailQty').value) || 1;
   const skuKey = `${p.id}|${color}|${size}`;
   const existing = cart.find(c => c.key === skuKey);
+  const cartQty = existing ? existing.qty : 0;
+  if (cartQty + qty > availableStock) { toast(`库存不足，仅剩 ${availableStock} 件`, 'error'); return; }
   if (existing) {
-    if (existing.qty + qty > p.stock) { toast('超过库存数量', 'error'); return; }
     existing.qty += qty;
   } else {
     cart.push({ key: skuKey, productId: p.id, name: p.name, price: p.price, image: p.image, color, size, qty });
@@ -1308,13 +1375,23 @@ async function submitOrder() {
   orders = allOrders;
   saveOrdersLocal();
 
-  // 扣库存
+  // 按 SKU 扣库存
   cart.forEach(c => {
     const p = products.find(x => x.id === c.productId);
-    if (p) { p.stock = Math.max(0, p.stock - c.qty); }
+    if (!p) return;
+    const hasSku = (p.colors && p.colors.length > 0) || (p.sizes && p.sizes.length > 0);
+    if (hasSku) {
+      const key = (c.color || '') + '|' + (c.size || '');
+      if (p.skuStock && key in p.skuStock) {
+        p.skuStock[key] = Math.max(0, p.skuStock[key] - c.qty);
+      }
+      p.stock = getTotalStock(p);
+    } else {
+      p.stock = Math.max(0, (p.stock || 0) - c.qty);
+    }
   });
   saveProductsLocal();
-  // 顾客端也同步库存到云端
+  // 同步库存到云端
   await writeCloudFile('products.json', products);
 
   cart = [];
@@ -1448,6 +1525,7 @@ function exportOrders() {
 function openProductModal(id) {
   editingColors = [];
   editingSizes = [];
+  editingSkuStock = {};
   pendingImage = '';
   document.getElementById('productModalTitle').textContent = id ? '编辑产品' : '新增产品';
   document.getElementById('productId').value = id || '';
@@ -1464,11 +1542,12 @@ function openProductModal(id) {
     if (p) {
       document.getElementById('productName').value = p.name;
       document.getElementById('productPrice').value = p.price;
-      document.getElementById('productStock').value = p.stock;
+      document.getElementById('productStock').value = p.stock || 0;
       document.getElementById('productDesc').value = p.desc || '';
       document.getElementById('imageUrl').value = (p.image && !p.image.startsWith('data:')) ? p.image : '';
       editingColors = [...(p.colors || [])];
       editingSizes = [...(p.sizes || [])];
+      editingSkuStock = {...(p.skuStock || {})};
       pendingImage = p.image || '';
       if (p.image) {
         showImagePreview(p.image);
@@ -1477,6 +1556,7 @@ function openProductModal(id) {
   }
   renderTags('color');
   renderTags('size');
+  renderSkuStockTable();
   document.getElementById('productModal').classList.add('active');
 }
 
@@ -1530,21 +1610,88 @@ function handleTagKeydown(e, type) {
     if (!arr.includes(val)) arr.push(val);
     e.target.value = '';
     renderTags(type);
+    renderSkuStockTable();
   }
 }
 
 function renderTags(type) {
   const wrap = document.getElementById(type === 'color' ? 'colorTags' : 'sizeTags');
   const arr = type === 'color' ? editingColors : editingSizes;
-  const input = wrap.querySelector('.tag-input');
   const tags = arr.map((v, i) => `<span class="tag">${escapeHtml(v)}<span class="remove" onclick="removeTag('${type}',${i})">×</span></span>`).join('');
   wrap.innerHTML = tags + `<input type="text" class="tag-input" placeholder="输入${type==='color'?'颜色':'尺寸'}后回车" onkeydown="handleTagKeydown(event,'${type}')">`;
+  renderSkuStockTable();
 }
 
 function removeTag(type, idx) {
   const arr = type === 'color' ? editingColors : editingSizes;
   arr.splice(idx, 1);
   renderTags(type);
+  renderSkuStockTable();
+}
+
+// SKU 库存表：颜色×尺寸的组合
+let editingSkuStock = {}; // key: "颜色|尺寸" -> stock number
+
+function renderSkuStockTable() {
+  const group = document.getElementById('skuStockGroup');
+  const totalGroup = document.getElementById('totalStockGroup');
+  const table = document.getElementById('skuStockTable');
+  const hasColors = editingColors.length > 0;
+  const hasSizes = editingSizes.length > 0;
+
+  if (!hasColors && !hasSizes) {
+    // 无颜色无尺寸：显示总库存输入框
+    group.style.display = 'none';
+    totalGroup.style.display = 'block';
+    return;
+  }
+  // 有颜色或尺寸：隐藏总库存，显示 SKU 表
+  group.style.display = 'block';
+  totalGroup.style.display = 'none';
+
+  // 生成组合
+  const colorList = hasColors ? editingColors : [''];
+  const sizeList = hasSizes ? editingSizes : [''];
+  let html = '';
+  for (const color of colorList) {
+    for (const size of sizeList) {
+      const key = color + '|' + size;
+      if (!(key in editingSkuStock)) editingSkuStock[key] = 0;
+      const label = [color, size].filter(Boolean).join(' / ') || '默认';
+      html += `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 10px;background:var(--bg);border-radius:6px;">
+        <span style="font-size:13px;">${escapeHtml(label)}</span>
+        <input type="number" value="${editingSkuStock[key]}" min="0" placeholder="0"
+          style="width:70px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;text-align:center;"
+          oninput="editingSkuStock['${key}']=parseInt(this.value)||0">
+      </div>`;
+    }
+  }
+  table.innerHTML = html;
+}
+
+// 获取产品的某个 SKU 的库存
+function getSkuStock(product, color, size) {
+  if (!product) return 0;
+  const hasColors = product.colors && product.colors.length > 0;
+  const hasSizes = product.sizes && product.sizes.length > 0;
+  if (!hasColors && !hasSizes) {
+    return product.stock || 0;
+  }
+  const key = (color || '') + '|' + (size || '');
+  if (product.skuStock && key in product.skuStock) {
+    return product.skuStock[key];
+  }
+  return 0;
+}
+
+// 计算产品总库存（所有 SKU 之和）
+function getTotalStock(product) {
+  if (!product) return 0;
+  const hasColors = product.colors && product.colors.length > 0;
+  const hasSizes = product.sizes && product.sizes.length > 0;
+  if (!hasColors && !hasSizes) return product.stock || 0;
+  if (!product.skuStock) return 0;
+  return Object.values(product.skuStock).reduce((s, v) => s + (parseInt(v) || 0), 0);
 }
 
 function saveProduct() {
@@ -1555,18 +1702,39 @@ function saveProduct() {
   const image = document.getElementById('imageUrl').value.trim() || pendingImage;
   if (!name) { toast('请填写产品名称', 'error'); return; }
   if (isNaN(price) || price < 0) { toast('请填写正确的价格', 'error'); return; }
+
+  const hasColors = editingColors.length > 0;
+  const hasSizes = editingSizes.length > 0;
+  const useSku = hasColors || hasSizes;
+  // 清理 SKU 库存：只保留当前颜色×尺寸的组合
+  const cleanSkuStock = {};
+  if (useSku) {
+    const colorList = hasColors ? editingColors : [''];
+    const sizeList = hasSizes ? editingSizes : [''];
+    for (const c of colorList) {
+      for (const s of sizeList) {
+        const key = c + '|' + s;
+        cleanSkuStock[key] = editingSkuStock[key] || 0;
+      }
+    }
+  }
+
   const id = document.getElementById('productId').value;
   if (id) {
     const p = products.find(x => x.id === id);
     if (p) {
-      p.name = name; p.price = price; p.stock = stock; p.desc = desc;
+      p.name = name; p.price = price; p.desc = desc;
       p.image = image; p.colors = [...editingColors]; p.sizes = [...editingSizes];
+      if (useSku) { p.skuStock = cleanSkuStock; p.stock = getTotalStock({skuStock: cleanSkuStock}); }
+      else { p.skuStock = {}; p.stock = stock; }
     }
   } else {
     products.push({
       id: 'P' + Date.now().toString(36).toUpperCase(),
-      name, price, stock, desc, image,
+      name, price, desc, image,
       colors: [...editingColors], sizes: [...editingSizes],
+      skuStock: useSku ? cleanSkuStock : {},
+      stock: useSku ? getTotalStock({skuStock: cleanSkuStock}) : stock,
       createdAt: new Date().toISOString()
     });
   }
