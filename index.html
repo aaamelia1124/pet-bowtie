@@ -627,6 +627,22 @@
   ::-webkit-scrollbar-thumb { background: #ddd; border-radius: 3px; }
   ::-webkit-scrollbar-thumb:hover { background: #ccc; }
 
+  /* 角色权限控制 */
+  .admin-only { display: none; }
+  .customer-only { display: none; }
+  body.admin-mode .admin-only { display: inline-flex; }
+  body.admin-mode .admin-only[style*="display: flex"],
+  body.admin-mode .admin-only[style*="display:flex"] { display: flex; }
+  body.admin-mode .sidebar .admin-only.btn-icon,
+  body.admin-mode .topbar-actions .admin-only.btn-icon { display: flex; }
+  body.admin-mode .admin-only:not(.btn):not(.btn-icon) { display: block; }
+  body.admin-mode .customer-only { display: none !important; }
+  body.customer-mode .customer-only { display: inline-flex; }
+  body.customer-mode .customer-only:not(.btn):not(.btn-icon) { display: block; }
+  body.customer-mode .admin-only { display: none !important; }
+  /* 顾客模式下隐藏产品编辑按钮 */
+  body.customer-mode .product-item .edit-actions { display: none !important; }
+
   /* 响应式 */
   @media (max-width: 1024px) {
     .main { grid-template-columns: 220px 1fr 300px; }
@@ -752,8 +768,10 @@
 <div class="topbar">
   <h1><span class="logo">🐾</span> DUODUO Studio</h1>
   <div class="topbar-actions">
-    <button class="btn btn-outline btn-sm" onclick="openOrdersView()">📋 订单管理 <span id="orderCountBadge" style="background:var(--danger);color:#fff;padding:1px 6px;border-radius:8px;font-size:11px;display:none;"></span></button>
-    <button class="btn btn-primary btn-sm" onclick="openProductModal()">+ 新增产品</button>
+    <button class="btn btn-outline btn-sm admin-only" onclick="openOrdersView()">📋 订单管理 <span id="orderCountBadge" style="background:var(--danger);color:#fff;padding:1px 6px;border-radius:8px;font-size:11px;display:none;"></span></button>
+    <button class="btn btn-primary btn-sm admin-only" onclick="openProductModal()">+ 新增产品</button>
+    <button class="btn btn-outline btn-sm admin-only" onclick="exitAdminMode()" title="退出商家模式">🚪 退出</button>
+    <button class="btn btn-outline btn-sm customer-only" onclick="openAdminLogin()">🔐 商家入口</button>
   </div>
 </div>
 
@@ -763,7 +781,7 @@
   <div class="sidebar">
     <div class="sidebar-header">
       <h2>产品目录</h2>
-      <button class="btn-icon" onclick="openProductModal()" title="新增产品">+</button>
+      <button class="btn-icon admin-only" onclick="openProductModal()" title="新增产品">+</button>
     </div>
     <div class="product-list" id="productList"></div>
   </div>
@@ -772,7 +790,8 @@
   <div class="content" id="productDetail">
     <div class="empty-state">
       <div class="icon">🎀</div>
-      <p>从左侧选择产品查看详情<br>或点击右上角新增产品</p>
+      <p class="customer-only">挑选你喜欢的宠物发夹吧 🐾</p>
+      <p class="admin-only">从左侧选择产品查看详情<br>或点击右上角新增产品</p>
     </div>
   </div>
 
@@ -928,6 +947,28 @@
     </div>
   </div>
   <div class="orders-body" id="ordersBody"></div>
+</div>
+
+<!-- 商家登录弹窗 -->
+<div class="modal-overlay" id="adminLoginModal">
+  <div class="modal" style="max-width:360px;">
+    <div class="modal-header">
+      <h3>🔐 商家登录</h3>
+      <button class="btn-icon" onclick="closeAdminLogin()">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">请输入商家密码进入管理模式</p>
+      <div class="form-group">
+        <label>商家密码</label>
+        <input type="password" id="adminPasswordInput" placeholder="输入密码" onkeydown="if(event.key==='Enter')doAdminLogin()">
+      </div>
+      <p id="adminLoginError" style="color:var(--danger);font-size:13px;display:none;">密码错误，请重试</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeAdminLogin()">取消</button>
+      <button class="btn btn-primary" onclick="doAdminLogin()">登录</button>
+    </div>
+  </div>
 </div>
 
 <!-- Toast -->
@@ -1434,6 +1475,60 @@ function formatTime(iso) {
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+// ============ 角色权限管理 ============
+const ADMIN_PASSWORD = 'duoduo2026'; // 商家密码，可自行修改
+const ADMIN_SESSION_KEY = 'pet_bowtie_admin_session';
+
+function isAdminMode() {
+  // URL 带 #admin 且 session 有效
+  if (location.hash === '#admin') {
+    const session = sessionStorage.getItem(ADMIN_SESSION_KEY);
+    return session === 'ok';
+  }
+  return false;
+}
+
+function applyRole() {
+  if (isAdminMode()) {
+    document.body.classList.add('admin-mode');
+    document.body.classList.remove('customer-mode');
+  } else {
+    document.body.classList.add('customer-mode');
+    document.body.classList.remove('admin-mode');
+  }
+}
+
+function openAdminLogin() {
+  document.getElementById('adminLoginModal').classList.add('active');
+  document.getElementById('adminPasswordInput').value = '';
+  document.getElementById('adminLoginError').style.display = 'none';
+  setTimeout(() => document.getElementById('adminPasswordInput').focus(), 100);
+}
+
+function closeAdminLogin() {
+  document.getElementById('adminLoginModal').classList.remove('active');
+}
+
+function doAdminLogin() {
+  const pwd = document.getElementById('adminPasswordInput').value;
+  if (pwd === ADMIN_PASSWORD) {
+    sessionStorage.setItem(ADMIN_SESSION_KEY, 'ok');
+    if (location.hash !== '#admin') location.hash = '#admin';
+    applyRole();
+    closeAdminLogin();
+    toast('已进入商家模式 ✓', 'success');
+  } else {
+    document.getElementById('adminLoginError').style.display = 'block';
+  }
+}
+
+function exitAdminMode() {
+  sessionStorage.removeItem(ADMIN_SESSION_KEY);
+  location.hash = '';
+  applyRole();
+  toast('已退出商家模式', '');
+}
+
 // ============ 初始化 ============
 function init() {
   // 如果没有任何产品，插入几个示例
@@ -1445,6 +1540,7 @@ function init() {
     ];
     saveProducts();
   }
+  applyRole();
   renderProductList();
   renderCart();
   updateOrderBadge();
