@@ -1145,6 +1145,9 @@ function renderProductList() {
     return `
       <div class="product-item ${p.id === currentProductId ? 'active' : ''}" onclick="selectProduct('${p.id}')">
         <img src="${firstImg}" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 44 44%22><rect fill=%22%23f7f5f2%22 width=%2244%22 height=%2244%22/><text x=%2211%22 y=%2230%22 font-size=%2220%22>🐾</text></svg>'">
+        <div class="info">
+          <div class="name">${escapeHtml(p.name)}</div>
+          <div class="price">$${p.price}</div>
         </div>
         <span class="stock-badge ${stockClass}">${stockText}</span>
         <div class="edit-actions" onclick="event.stopPropagation()">
