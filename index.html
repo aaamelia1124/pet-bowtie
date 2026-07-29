@@ -1059,6 +1059,7 @@ let pendingImages = []; // 最多4张图片
 let cloudSyncing = false;
 
 function saveProductsLocal() {
+  lastLocalSaveTime = Date.now();
   try {
     localStorage.setItem(STORAGE_KEY_PRODUCTS, JSON.stringify(products));
   } catch(e) {
@@ -1080,6 +1081,13 @@ function saveProductsLocal() {
 function saveOrdersLocal() { localStorage.setItem(STORAGE_KEY_ORDERS, JSON.stringify(orders)); }
 function saveCart() { localStorage.setItem(STORAGE_KEY_CART, JSON.stringify(cart)); }
 function saveProducts() { saveProductsLocal(); if (isAdminMode()) syncProductsToCloud(); }
+async function saveProductsAsync() {
+  saveProductsLocal();
+  if (isAdminMode()) {
+    const ok = await syncProductsToCloud();
+    if (!ok) throw new Error('云端写入失败');
+  }
+}
 function saveOrders() { saveOrdersLocal(); }
 
 // ============ 云端同步 ============
@@ -1107,17 +1115,23 @@ async function fetchCloudData(filename) {
   }
 }
 
+let lastLocalSaveTime = 0; // 本地最后一次保存时间
+
 async function syncFromCloud() {
   if (cloudSyncing) return;
   cloudSyncing = true;
   try {
+    // 如果刚在本地保存过（10秒内），不拉取云端产品，避免覆盖
+    const recentlySaved = Date.now() - lastLocalSaveTime < 10000;
     // 拉取云端产品
-    const cloudProducts = await fetchCloudData('products.json');
-    if (cloudProducts && Array.isArray(cloudProducts) && cloudProducts.length > 0) {
-      products = cloudProducts;
-      saveProductsLocal();
-      renderProductList();
-      if (currentProductId) selectProduct(currentProductId);
+    if (!recentlySaved) {
+      const cloudProducts = await fetchCloudData('products.json');
+      if (cloudProducts && Array.isArray(cloudProducts) && cloudProducts.length > 0) {
+        products = cloudProducts;
+        saveProductsLocal();
+        renderProductList();
+        if (currentProductId) selectProduct(currentProductId);
+      }
     }
     // 拉取云端订单
     const cloudOrders = await fetchCloudData('orders.json');
@@ -1157,9 +1171,11 @@ async function writeCloudFile(filename, data) {
 }
 
 async function syncProductsToCloud() {
-  if (!isAdminMode()) return;
+  if (!isAdminMode()) return false;
   const ok = await writeCloudFile('products.json', products);
   if (ok) toast('产品已同步到云端 ✓', 'success');
+  else toast('云端同步失败，数据已保存到本地', 'error');
+  return ok;
 }
 
 async function syncOrdersToCloud() {
@@ -1894,7 +1910,7 @@ function getTotalStock(product) {
   return Object.values(product.skuStock).reduce((s, v) => s + (parseInt(v) || 0), 0);
 }
 
-function saveProduct() {
+async function saveProduct() {
   const name = document.getElementById('productName').value.trim();
   const price = parseFloat(document.getElementById('productPrice').value);
   const stock = parseInt(document.getElementById('productStock').value) || 0;
@@ -1949,21 +1965,28 @@ function saveProduct() {
     });
   }
   try {
-    saveProducts();
+    await saveProductsAsync();
     renderProductList();
     if (currentProductId) selectProduct(currentProductId);
     closeProductModal();
     toast('产品已保存 ✓', 'success');
   } catch(e) {
     console.log('save error:', e);
-    toast('保存失败：' + e.message, 'error');
+    renderProductList();
+    if (currentProductId) selectProduct(currentProductId);
+    closeProductModal();
+    toast('已保存到本地，云端同步失败：' + e.message, 'error');
   }
 }
 
-function deleteProduct(id) {
+async function deleteProduct(id) {
   if (!confirm('确定删除该产品？')) return;
   products = products.filter(p => p.id !== id);
-  saveProducts();
+  try {
+    await saveProductsAsync();
+  } catch(e) {
+    saveProductsLocal();
+  }
   if (currentProductId === id) {
     currentProductId = null;
     document.getElementById('productDetail').innerHTML = '<div class="empty-state"><div class="icon">🎀</div><p>从左侧选择产品查看详情</p></div>';
