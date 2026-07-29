@@ -678,8 +678,11 @@
   body.admin-mode .topbar-actions .admin-only.btn-icon { display: flex; }
   body.admin-mode .admin-only:not(.btn):not(.btn-icon) { display: block; }
   body.admin-mode .customer-only { display: none !important; }
+  /* 商家模式隐藏购物车，内容区占满 */
+  body.admin-mode .main { grid-template-columns: 260px 1fr !important; }
   body.customer-mode .customer-only { display: inline-flex; }
-  body.customer-mode .customer-only:not(.btn):not(.btn-icon) { display: block; }
+  body.customer-mode .customer-only:not(.btn):not(.btn-icon):not(.cart-panel):not(.sidebar):not(.content) { display: block; }
+  body.customer-mode .cart-panel.customer-only { display: flex; }
   body.customer-mode .admin-only { display: none !important; }
   /* 顾客模式下隐藏产品编辑按钮 */
   body.customer-mode .product-item .edit-actions { display: none !important; }
@@ -840,7 +843,7 @@
   </div>
 
   <!-- 右列：购物车 -->
-  <div class="cart-panel">
+  <div class="cart-panel customer-only">
     <div class="cart-header">
       <h2>🛒 购物车</h2>
       <span class="count" id="cartCount">0</span>
