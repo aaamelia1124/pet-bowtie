@@ -1029,7 +1029,8 @@ function saveOrders() { saveOrdersLocal(); }
 // 用 GitHub API 读取（带 token，可绕过 CDN 缓存）
 async function fetchCloudData(filename) {
   try {
-    const resp = await fetch(GH_API + filename, {
+    const resp = await fetch(GH_API + filename + '?ref=main&t=' + Date.now(), {
+      cache: 'no-store',
       headers: {
         'Authorization': 'token ' + GH_TOKEN,
         'Accept': 'application/vnd.github.raw+json'
@@ -1041,7 +1042,7 @@ async function fetchCloudData(filename) {
   } catch(e) {
     // 回退到 raw.githubusercontent（加时间戳防缓存）
     try {
-      const resp2 = await fetch(GH_RAW + filename + '?t=' + Date.now());
+      const resp2 = await fetch(GH_RAW + filename + '?t=' + Date.now(), { cache: 'no-store' });
       return await resp2.json();
     } catch(e2) {
       return null;
