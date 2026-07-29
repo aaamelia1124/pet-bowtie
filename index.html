@@ -682,7 +682,8 @@
   body.admin-mode .main { grid-template-columns: 260px 1fr !important; }
   body.customer-mode .customer-only { display: inline-flex; }
   body.customer-mode .customer-only:not(.btn):not(.btn-icon):not(.cart-panel):not(.sidebar):not(.content) { display: block; }
-  body.customer-mode .cart-panel.customer-only { display: flex; }
+  body.customer-mode .cart-panel.customer-only { display: none !important; }
+  body.customer-mode .cart-panel.customer-only.mobile-active { display: flex !important; }
   body.customer-mode .admin-only { display: none !important; }
   /* 顾客模式下隐藏产品编辑按钮 */
   body.customer-mode .product-item .edit-actions { display: none !important; }
