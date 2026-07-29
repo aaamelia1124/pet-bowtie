@@ -771,6 +771,7 @@
     <button class="btn btn-outline btn-sm admin-only" onclick="openOrdersView()">📋 订单管理 <span id="orderCountBadge" style="background:var(--danger);color:#fff;padding:1px 6px;border-radius:8px;font-size:11px;display:none;"></span></button>
     <button class="btn btn-primary btn-sm admin-only" onclick="openProductModal()">+ 新增产品</button>
     <button class="btn btn-outline btn-sm admin-only" onclick="exitAdminMode()" title="退出商家模式">🚪 退出</button>
+    <button class="btn btn-outline btn-sm customer-only" onclick="openMyOrders()">📦 我的订单</button>
     <button class="btn btn-outline btn-sm customer-only" onclick="openAdminLogin()">🔐 商家入口</button>
   </div>
 </div>
@@ -831,6 +832,10 @@
     <span class="icon">🛒</span>
     购物车
     <span class="badge" id="mobileCartBadge" style="display:none;">0</span>
+  </button>
+  <button class="tab customer-only" data-tab="orders" onclick="openMyOrders()">
+    <span class="icon">📦</span>
+    我的订单
   </button>
 </nav>
 
@@ -951,6 +956,18 @@
     </div>
   </div>
   <div class="orders-body" id="ordersBody"></div>
+</div>
+
+<!-- 顾客端：我的订单页 -->
+<div class="orders-view" id="myOrdersView">
+  <div class="orders-header">
+    <h2>📦 我的订单</h2>
+    <div style="display:flex;gap:10px;align-items:center;">
+      <button class="btn btn-outline btn-sm" onclick="refreshMyOrders()">🔄 刷新</button>
+      <button class="btn btn-primary btn-sm" onclick="closeMyOrders()">← 返回购物</button>
+    </div>
+  </div>
+  <div class="orders-body" id="myOrdersBody"></div>
 </div>
 
 <!-- 商家登录弹窗 -->
@@ -1402,6 +1419,13 @@ async function submitOrder() {
   closeCheckout();
   updateOrderBadge();
 
+  // 顾客端：记录订单 ID 到本机，方便查询
+  if (!myOrderIds.includes(order.id)) {
+    myOrderIds.unshift(order.id);
+    if (myOrderIds.length > 50) myOrderIds = myOrderIds.slice(0, 50);
+    saveMyOrderIds();
+  }
+
   if (btn) { btn.disabled = false; btn.textContent = '提交订单'; }
 
   if (ok) {
@@ -1425,6 +1449,71 @@ async function openOrdersView() {
 
 function closeOrdersView() {
   document.getElementById('ordersView').classList.remove('active');
+}
+
+// ============ 顾客端：我的订单 ============
+// 顾客的订单存在 localStorage，记录本机下过的单
+const STORAGE_KEY_MY_ORDERS = 'pet_bowtie_my_orders';
+let myOrderIds = JSON.parse(localStorage.getItem(STORAGE_KEY_MY_ORDERS) || '[]');
+
+function saveMyOrderIds() { localStorage.setItem(STORAGE_KEY_MY_ORDERS, JSON.stringify(myOrderIds)); }
+
+function openMyOrders() {
+  document.getElementById('myOrdersView').classList.add('active');
+  document.getElementById('myOrdersBody').innerHTML = '<div class="empty-state"><div class="icon">⏳</div><p>正在查询订单...</p></div>';
+  renderMyOrders();
+}
+
+function closeMyOrders() {
+  document.getElementById('myOrdersView').classList.remove('active');
+}
+
+async function refreshMyOrders() {
+  document.getElementById('myOrdersBody').innerHTML = '<div class="empty-state"><div class="icon">⏳</div><p>正在刷新...</p></div>';
+  await renderMyOrders();
+}
+
+async function renderMyOrders() {
+  if (myOrderIds.length === 0) {
+    document.getElementById('myOrdersBody').innerHTML = '<div class="empty-state"><div class="icon">📦</div><p>还没有订单<br>下单后可以在这里查看</p></div>';
+    return;
+  }
+  // 从云端拉取最新订单，筛选出本机的订单
+  const cloudOrders = await fetchCloudData('orders.json');
+  let myOrders = [];
+  if (cloudOrders && Array.isArray(cloudOrders)) {
+    myOrders = cloudOrders.filter(o => myOrderIds.includes(o.id));
+  }
+  if (myOrders.length === 0) {
+    document.getElementById('myOrdersBody').innerHTML = '<div class="empty-state"><div class="icon">📦</div><p>订单查询中，请稍后刷新</p></div>';
+    return;
+  }
+  document.getElementById('myOrdersBody').innerHTML = myOrders.map(o => {
+    const statusText = o.status === 'pending' ? '⏳ 待处理' : '✅ 已完成';
+    const statusClass = o.status === 'pending' ? 'pending' : 'done';
+    return `
+    <div class="order-card ${o.status === 'done' ? 'done' : ''}">
+      <div class="oc-top">
+        <div class="oc-id">
+          <strong>${o.id}</strong><br>
+          <span class="status-badge ${statusClass}">${statusText}</span>
+        </div>
+        <div class="oc-time">${formatTime(o.time)}</div>
+      </div>
+      <div class="oc-items">
+        ${o.items.map(it => `
+          <div class="oc-item">
+            <span>${escapeHtml(it.name)} ${it.color||it.size ? '<small style="color:var(--muted)">'+(it.color||'')+(it.color&&it.size?'/':'')+(it.size||'')+'</small>' : ''} ×${it.qty}</span>
+            <span>¥${(it.price * it.qty).toFixed(2)}</span>
+          </div>
+        `).join('')}
+      </div>
+      <div class="oc-total">
+        <span>合计</span>
+        <span>¥${o.total.toFixed(2)}</span>
+      </div>
+    </div>
+  `}).join('');
 }
 
 function renderOrders() {
