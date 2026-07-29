@@ -121,7 +121,7 @@
   .main {
     flex: 1;
     display: grid;
-    grid-template-columns: 260px 1fr 340px;
+    grid-template-columns: 320px 1fr 340px;
     overflow: hidden;
   }
 
@@ -454,9 +454,8 @@
   .form-group select:focus { border-color: var(--primary); }
   .form-group textarea { resize: vertical; min-height: 80px; }
   .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  .image-preview {
-    width: 100%;
-    height: 140px;
+  .image-grid-item {
+    aspect-ratio: 1;
     border: 2px dashed var(--border);
     border-radius: 8px;
     display: flex;
@@ -467,9 +466,25 @@
     cursor: pointer;
     position: relative;
   }
-  .image-preview img { width: 100%; height: 100%; object-fit: cover; }
-  .image-preview .hint { color: var(--muted); font-size: 13px; text-align: center; }
-  .image-preview .hint .icon { display: block; font-size: 28px; margin-bottom: 4px; }
+  .image-grid-item img { width: 100%; height: 100%; object-fit: cover; }
+  .image-grid-item .hint { color: var(--muted); font-size: 11px; text-align: center; }
+  .image-grid-item .hint .icon { display: block; font-size: 24px; margin-bottom: 2px; }
+  .image-grid-item .remove-img {
+    position: absolute;
+    top: 4px; right: 4px;
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    background: var(--danger);
+    color: #fff;
+    border: none;
+    font-size: 11px;
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    justify-content: center;
+  }
+  .image-grid-item.has-image:hover .remove-img { display: flex; }
+  .image-grid-item.has-image { border-style: solid; border-color: var(--border); }
   .tag-input-wrap {
     display: flex;
     flex-wrap: wrap;
@@ -645,7 +660,7 @@
 
   /* 响应式 */
   @media (max-width: 1024px) {
-    .main { grid-template-columns: 220px 1fr 300px; }
+    .main { grid-template-columns: 300px 1fr 300px; }
   }
 
   /* 移动端：三列变标签切换 */
@@ -688,7 +703,7 @@
       overflow-y: auto;
       padding: 16px;
     }
-    .product-detail .image-wrap { height: 240px; }
+    .product-detail .image-wrap { height: 300px; }
     .detail-body { padding: 18px 16px; }
     .detail-body h2 { font-size: 19px; }
     .modal { width: 94%; max-height: 88vh; }
@@ -849,15 +864,12 @@
     <div class="modal-body">
       <input type="hidden" id="productId">
       <div class="form-group">
-        <label>产品图片</label>
-        <div class="image-preview" id="imagePreview" onclick="document.getElementById('imageInput').click()">
-          <div class="hint" id="imageHint">
-            <span class="icon">📷</span>
-            点击上传图片
-          </div>
+        <label>产品图片（最多4张）</label>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;" id="imageGrid">
+          <!-- 动态生成 -->
         </div>
-        <input type="file" id="imageInput" accept="image/*" style="display:none;" onchange="handleImageUpload(event)">
-        <input type="text" id="imageUrl" placeholder="或粘贴图片链接" style="margin-top:8px;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:13px;" oninput="handleImageUrlInput(this.value)">
+        <input type="file" id="imageInput" accept="image/*" multiple style="display:none;" onchange="handleImageUpload(event)">
+        <input type="text" id="imageUrl" placeholder="或粘贴图片链接（多个用英文逗号分隔）" style="margin-top:8px;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:13px;" oninput="handleImageUrlInput(this.value)">
       </div>
       <div class="form-group">
         <label>产品名称</label>
@@ -1016,7 +1028,7 @@ let cart = JSON.parse(localStorage.getItem(STORAGE_KEY_CART) || '[]');
 let currentProductId = null;
 let editingColors = [];
 let editingSizes = [];
-let pendingImage = '';
+let pendingImages = []; // 最多4张图片
 let cloudSyncing = false;
 
 function saveProductsLocal() { localStorage.setItem(STORAGE_KEY_PRODUCTS, JSON.stringify(products)); }
@@ -1129,12 +1141,10 @@ function renderProductList() {
     const totalStock = getTotalStock(p);
     const stockClass = totalStock <= 0 ? 'out' : totalStock <= 5 ? 'low' : '';
     const stockText = totalStock <= 0 ? '缺货' : `库存${totalStock}`;
+    const firstImg = (p.images && p.images.length > 0) ? p.images[0] : (p.image || '🐾');
     return `
       <div class="product-item ${p.id === currentProductId ? 'active' : ''}" onclick="selectProduct('${p.id}')">
-        <img src="${p.image || '🐾'}" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 44 44%22><rect fill=%22%23f7f5f2%22 width=%2244%22 height=%2244%22/><text x=%2211%22 y=%2230%22 font-size=%2220%22>🐾</text></svg>'">
-        <div class="info">
-          <div class="name">${escapeHtml(p.name)}</div>
-          <div class="price">$${p.price}</div>
+        <img src="${firstImg}" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 44 44%22><rect fill=%22%23f7f5f2%22 width=%2244%22 height=%2244%22/><text x=%2211%22 y=%2230%22 font-size=%2220%22>🐾</text></svg>'">
         </div>
         <span class="stock-badge ${stockClass}">${stockText}</span>
         <div class="edit-actions" onclick="event.stopPropagation()">
@@ -1160,11 +1170,25 @@ function selectProduct(id) {
   const hasSku = colors.length > 0 || sizes.length > 0;
   const totalStock = getTotalStock(p);
   const outOfStock = totalStock <= 0;
+  // 获取多图列表
+  const allImages = (p.images && Array.isArray(p.images) && p.images.length > 0) ? p.images : (p.image ? [p.image] : []);
+  const imageHtml = allImages.length > 0 ? `
+    <div class="image-wrap">
+      <img src="${allImages[0]}" id="detailMainImg" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 400 300%22><rect fill=%22%23f7f5f2%22 width=%22400%22 height=%22300%22/><text x=%22200%22 y=%22170%22 text-anchor=%22middle%22 font-size=%2280%22>🎀</text></svg>'">
+    </div>
+    ${allImages.length > 1 ? `
+    <div style="display:flex;gap:8px;padding:8px 0;overflow-x:auto;">
+      ${allImages.map((img, idx) => `
+        <img src="${img}" onclick="document.getElementById('detailMainImg').src=this.src"
+          style="width:56px;height:56px;object-fit:cover;border-radius:6px;cursor:pointer;border:2px solid ${idx===0?'var(--primary)':'transparent'};flex-shrink:0;"
+          onerror="this.style.display='none'">
+      `).join('')}
+    </div>
+    ` : ''}
+  ` : '<div class="image-wrap"><div class="placeholder">🎀</div></div>';
   detail.innerHTML = `
     <div class="product-detail">
-      <div class="image-wrap">
-        ${p.image ? `<img src="${p.image}" onerror="this.parentElement.innerHTML='<div class=\\'placeholder\\'>🎀</div>'">` : '<div class="placeholder">🎀</div>'}
-      </div>
+      ${imageHtml}
       <div class="detail-body">
         <h2>${escapeHtml(p.name)}</h2>
         <div class="price">$${p.price}</div>
@@ -1616,7 +1640,7 @@ function openProductModal(id) {
   editingColors = [];
   editingSizes = [];
   editingSkuStock = {};
-  pendingImage = '';
+  pendingImages = [];
   document.getElementById('productModalTitle').textContent = id ? '编辑产品' : '新增产品';
   document.getElementById('productId').value = id || '';
   document.getElementById('productName').value = '';
@@ -1625,8 +1649,6 @@ function openProductModal(id) {
   document.getElementById('productDesc').value = '';
   document.getElementById('imageUrl').value = '';
   document.getElementById('imageInput').value = '';
-  document.getElementById('imageHint').innerHTML = '<span class="icon">📷</span>点击上传图片';
-  document.getElementById('imagePreview').querySelector('img')?.remove();
   if (id) {
     const p = products.find(x => x.id === id);
     if (p) {
@@ -1634,16 +1656,17 @@ function openProductModal(id) {
       document.getElementById('productPrice').value = p.price;
       document.getElementById('productStock').value = p.stock || 0;
       document.getElementById('productDesc').value = p.desc || '';
-      document.getElementById('imageUrl').value = (p.image && !p.image.startsWith('data:')) ? p.image : '';
       editingColors = [...(p.colors || [])];
       editingSizes = [...(p.sizes || [])];
       editingSkuStock = {...(p.skuStock || {})};
-      pendingImage = p.image || '';
-      if (p.image) {
-        showImagePreview(p.image);
+      if (p.images && Array.isArray(p.images) && p.images.length > 0) {
+        pendingImages = [...p.images];
+      } else if (p.image) {
+        pendingImages = [p.image];
       }
     }
   }
+  renderImageGrid();
   renderTags('color');
   renderTags('size');
   renderSkuStockTable();
@@ -1654,41 +1677,71 @@ function closeProductModal() {
   document.getElementById('productModal').classList.remove('active');
 }
 
-function handleImageUpload(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = (ev) => {
-    pendingImage = ev.target.result;
-    showImagePreview(pendingImage);
-    document.getElementById('imageUrl').value = '';
+// ============ 多图管理 ============
+function renderImageGrid() {
+  const grid = document.getElementById('imageGrid');
+  let html = '';
+  for (let i = 0; i < 4; i++) {
+    const src = pendingImages[i] || '';
+    if (src) {
+      html += `<div class="image-grid-item has-image" title="点击删除图片">
+        <img src="${src}" onerror="this.parentElement.className='image-grid-item';this.parentElement.innerHTML='<div class=hint><span class=icon>⚠️</span></div>'">
+        <button class="remove-img" onclick="event.stopPropagation();removeImageSlot(${i})">✕</button>
+      </div>`;
+    } else {
+      html += `<div class="image-grid-item" onclick="uploadImageToSlot(${i})">
+        <div class="hint"><span class="icon">📷</span>上传</div>
+      </div>`;
+    }
+  }
+  grid.innerHTML = html;
+}
+
+function uploadImageToSlot(idx) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.onchange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      pendingImages[idx] = ev.target.result;
+      renderImageGrid();
+    };
+    reader.readAsDataURL(file);
   };
-  reader.readAsDataURL(file);
+  input.click();
+}
+
+function removeImageSlot(idx) {
+  pendingImages.splice(idx, 1);
+  renderImageGrid();
+}
+
+function handleImageUpload(e) {
+  const files = Array.from(e.target.files);
+  let targetIdx = pendingImages.length;
+  files.forEach(file => {
+    if (targetIdx >= 4) return;
+    const idx = targetIdx;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      pendingImages[idx] = ev.target.result;
+      renderImageGrid();
+    };
+    reader.readAsDataURL(file);
+    targetIdx++;
+  });
 }
 
 function handleImageUrlInput(url) {
   if (url) {
-    pendingImage = url;
-    showImagePreview(url);
-  } else if (!pendingImage) {
-    document.getElementById('imageHint').style.display = 'block';
-    document.getElementById('imagePreview').querySelector('img')?.remove();
+    pendingImages = url.split(',').map(u => u.trim()).filter(Boolean).slice(0, 4);
+    renderImageGrid();
+  } else if (pendingImages.length === 0) {
+    renderImageGrid();
   }
-}
-
-function showImagePreview(src) {
-  const preview = document.getElementById('imagePreview');
-  preview.querySelector('img')?.remove();
-  document.getElementById('imageHint').style.display = 'none';
-  const img = document.createElement('img');
-  img.src = src;
-  img.onerror = () => {
-    img.remove();
-    document.getElementById('imageHint').style.display = 'block';
-    document.getElementById('imageHint').innerHTML = '<span class="icon">⚠️</span>图片加载失败';
-    pendingImage = '';
-  };
-  preview.appendChild(img);
 }
 
 function handleTagKeydown(e, type) {
@@ -1798,7 +1851,16 @@ function saveProduct() {
   const price = parseFloat(document.getElementById('productPrice').value);
   const stock = parseInt(document.getElementById('productStock').value) || 0;
   const desc = document.getElementById('productDesc').value.trim();
-  const image = document.getElementById('imageUrl').value.trim() || pendingImage;
+  // 合并图片链接和上传的图片
+  const urlImages = document.getElementById('imageUrl').value.trim();
+  let finalImages = [];
+  if (urlImages) {
+    finalImages = urlImages.split(',').map(u => u.trim()).filter(Boolean).slice(0, 4);
+  } else if (pendingImages.length > 0) {
+    finalImages = pendingImages.filter(Boolean).slice(0, 4);
+  }
+  // 保持向后兼容：第一个图也存到 image 字段
+  const firstImage = finalImages.length > 0 ? finalImages[0] : '';
   if (!name) { toast('请填写产品名称', 'error'); return; }
   if (isNaN(price) || price < 0) { toast('请填写正确的价格', 'error'); return; }
 
@@ -1823,14 +1885,15 @@ function saveProduct() {
     const p = products.find(x => x.id === id);
     if (p) {
       p.name = name; p.price = price; p.desc = desc;
-      p.image = image; p.colors = [...editingColors]; p.sizes = [...editingSizes];
+      p.image = firstImage; p.images = finalImages; p.colors = [...editingColors]; p.sizes = [...editingSizes];
       if (useSku) { p.skuStock = cleanSkuStock; p.stock = getTotalStock({skuStock: cleanSkuStock}); }
       else { p.skuStock = {}; p.stock = stock; }
     }
   } else {
     products.push({
       id: 'P' + Date.now().toString(36).toUpperCase(),
-      name, price, desc, image,
+      name, price, desc,
+      image: firstImage, images: finalImages,
       colors: [...editingColors], sizes: [...editingSizes],
       skuStock: useSku ? cleanSkuStock : {},
       stock: useSku ? getTotalStock({skuStock: cleanSkuStock}) : stock,
