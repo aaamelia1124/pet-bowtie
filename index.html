@@ -811,7 +811,7 @@
     <div class="cart-footer" id="cartFooter" style="display:none;">
       <div class="cart-total">
         <span class="label">合计</span>
-        <span class="amount" id="cartTotal">¥0</span>
+        <span class="amount" id="cartTotal">$0</span>
       </div>
       <button class="btn btn-primary" onclick="openCheckout()">去下单</button>
     </div>
@@ -865,7 +865,7 @@
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label>价格（元）</label>
+          <label>价格（CAD）</label>
           <input type="number" id="productPrice" placeholder="0.00" step="0.01" min="0">
         </div>
         <div class="form-group" id="totalStockGroup">
@@ -930,7 +930,7 @@
       <div class="checkout-summary" id="checkoutSummary"></div>
       <div class="checkout-total">
         <span>合计</span>
-        <span id="checkoutTotal">¥0</span>
+        <span id="checkoutTotal">$0</span>
       </div>
       <p style="font-size:12px;color:var(--muted);text-align:center;margin-top:8px;">下单后商家将收到订单，无需在线支付 💳</p>
     </div>
@@ -1134,7 +1134,7 @@ function renderProductList() {
         <img src="${p.image || '🐾'}" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 44 44%22><rect fill=%22%23f7f5f2%22 width=%2244%22 height=%2244%22/><text x=%2211%22 y=%2230%22 font-size=%2220%22>🐾</text></svg>'">
         <div class="info">
           <div class="name">${escapeHtml(p.name)}</div>
-          <div class="price">¥${p.price}</div>
+          <div class="price">$${p.price}</div>
         </div>
         <span class="stock-badge ${stockClass}">${stockText}</span>
         <div class="edit-actions" onclick="event.stopPropagation()">
@@ -1167,7 +1167,7 @@ function selectProduct(id) {
       </div>
       <div class="detail-body">
         <h2>${escapeHtml(p.name)}</h2>
-        <div class="price">¥${p.price}</div>
+        <div class="price">$${p.price}</div>
         ${p.desc ? `<div class="desc">${escapeHtml(p.desc)}</div>` : ''}
         ${colors.length ? `
         <div class="sku-section">
@@ -1325,14 +1325,14 @@ function renderCart() {
         <div class="ci-name">${escapeHtml(c.name)}</div>
         ${c.color || c.size ? `<div class="ci-sku">${c.color ? c.color : ''}${c.color && c.size ? ' / ' : ''}${c.size ? c.size : ''}</div>` : ''}
         <div class="ci-bottom">
-          <span class="ci-price">¥${(c.price * c.qty).toFixed(2)}</span>
+          <span class="ci-price">$${(c.price * c.qty).toFixed(2)}</span>
           <span class="ci-qty">×${c.qty}</span>
         </div>
       </div>
     </div>
   `).join('');
   const total = cart.reduce((s,c) => s + c.price * c.qty, 0);
-  document.getElementById('cartTotal').textContent = '¥' + total.toFixed(2);
+  document.getElementById('cartTotal').textContent = '$' + total.toFixed(2);
 }
 
 function removeCartItem(idx) {
@@ -1348,11 +1348,11 @@ function openCheckout() {
   summary.innerHTML = cart.map(c => `
     <div class="cs-item">
       <span>${escapeHtml(c.name)} ${c.color ? '('+c.color : ''}${c.color&&c.size?'/':''}${c.size?c.size:''}${c.color||c.size?')':''} ×${c.qty}</span>
-      <span>¥${(c.price * c.qty).toFixed(2)}</span>
+      <span>$${(c.price * c.qty).toFixed(2)}</span>
     </div>
   `).join('');
   const total = cart.reduce((s,c) => s + c.price * c.qty, 0);
-  document.getElementById('checkoutTotal').textContent = '¥' + total.toFixed(2);
+  document.getElementById('checkoutTotal').textContent = '$' + total.toFixed(2);
   document.getElementById('checkoutModal').classList.add('active');
 }
 
@@ -1505,13 +1505,13 @@ async function renderMyOrders() {
         ${o.items.map(it => `
           <div class="oc-item">
             <span>${escapeHtml(it.name)} ${it.color||it.size ? '<small style="color:var(--muted)">'+(it.color||'')+(it.color&&it.size?'/':'')+(it.size||'')+'</small>' : ''} ×${it.qty}</span>
-            <span>¥${(it.price * it.qty).toFixed(2)}</span>
+            <span>$${(it.price * it.qty).toFixed(2)}</span>
           </div>
         `).join('')}
       </div>
       <div class="oc-total">
         <span>合计</span>
-        <span>¥${o.total.toFixed(2)}</span>
+        <span>$${o.total.toFixed(2)}</span>
       </div>
     </div>
   `}).join('');
@@ -1546,13 +1546,13 @@ function renderOrders() {
         ${o.items.map(it => `
           <div class="oc-item">
             <span>${escapeHtml(it.name)} ${it.color||it.size ? '<small style="color:var(--muted)">'+(it.color||'')+(it.color&&it.size?'/':'')+(it.size||'')+'</small>' : ''} ×${it.qty}</span>
-            <span>¥${(it.price * it.qty).toFixed(2)}</span>
+            <span>$${(it.price * it.qty).toFixed(2)}</span>
           </div>
         `).join('')}
       </div>
       <div class="oc-total">
         <span>合计</span>
-        <span>¥${o.total.toFixed(2)}</span>
+        <span>$${o.total.toFixed(2)}</span>
       </div>
       <div class="oc-actions">
         ${o.status === 'pending' ? `<button class="btn btn-primary btn-sm" onclick="markOrderDone('${o.id}')">标记完成</button>` : ''}
