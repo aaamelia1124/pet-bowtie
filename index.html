@@ -1058,7 +1058,25 @@ let editingSizes = [];
 let pendingImages = []; // 最多4张图片
 let cloudSyncing = false;
 
-function saveProductsLocal() { localStorage.setItem(STORAGE_KEY_PRODUCTS, JSON.stringify(products)); }
+function saveProductsLocal() {
+  try {
+    localStorage.setItem(STORAGE_KEY_PRODUCTS, JSON.stringify(products));
+  } catch(e) {
+    console.log('localStorage save error:', e);
+    // 存储空间不足时，尝试去掉 data URI 图片再存
+    try {
+      const stripped = products.map(p => {
+        const copy = {...p};
+        if (copy.images) copy.images = copy.images.map(img => img && img.startsWith('data:') ? '' : img);
+        if (copy.image && copy.image.startsWith('data:')) copy.image = '';
+        return copy;
+      });
+      localStorage.setItem(STORAGE_KEY_PRODUCTS, JSON.stringify(stripped));
+    } catch(e2) {
+      console.log('localStorage still full:', e2);
+    }
+  }
+}
 function saveOrdersLocal() { localStorage.setItem(STORAGE_KEY_ORDERS, JSON.stringify(orders)); }
 function saveCart() { localStorage.setItem(STORAGE_KEY_CART, JSON.stringify(cart)); }
 function saveProducts() { saveProductsLocal(); if (isAdminMode()) syncProductsToCloud(); }
@@ -1930,11 +1948,16 @@ function saveProduct() {
       createdAt: new Date().toISOString()
     });
   }
-  saveProducts();
-  renderProductList();
-  if (currentProductId) selectProduct(currentProductId);
-  closeProductModal();
-  toast('产品已保存 ✓', 'success');
+  try {
+    saveProducts();
+    renderProductList();
+    if (currentProductId) selectProduct(currentProductId);
+    closeProductModal();
+    toast('产品已保存 ✓', 'success');
+  } catch(e) {
+    console.log('save error:', e);
+    toast('保存失败：' + e.message, 'error');
+  }
 }
 
 function deleteProduct(id) {
