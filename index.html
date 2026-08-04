@@ -1462,15 +1462,16 @@ function openCheckout() {
     </div>
   `).join('');
   const total = cart.reduce((s,c) => s + c.price * c.qty, 0);
-  // 优惠券选择
+  // 优惠券选择（可多选叠加）
   selectedCouponId = null;
+  selectedCouponIds = [];
   const couponSection = document.getElementById('couponSection');
   const couponChoices = document.getElementById('couponChoices');
   document.getElementById('couponDiscount').textContent = '';
   if (coupons.length > 0) {
     couponSection.style.display = 'block';
-    couponChoices.innerHTML = `<div class="sku-chip selected" onclick="selectCoupon('')" style="font-size:13px;">不使用</div>` +
-      coupons.map(c => `<div class="sku-chip" onclick="selectCoupon('${c.id}')" style="font-size:13px;">🎟️ -$${c.value}</div>`).join('');
+    couponChoices.innerHTML = coupons.map(c => `<div class="sku-chip" data-coupon-id="${c.id}" onclick="toggleCoupon('${c.id}')" style="font-size:13px;">🎟️ -$${c.value}</div>`).join('') +
+      `<div class="sku-chip selected" onclick="clearAllCoupons()" style="font-size:13px;">不使用</div>`;
   } else {
     couponSection.style.display = 'none';
   }
@@ -1478,24 +1479,59 @@ function openCheckout() {
   document.getElementById('checkoutModal').classList.add('active');
 }
 
-function selectCoupon(couponId) {
-  selectedCouponId = couponId || null;
-  document.querySelectorAll('#couponChoices .sku-chip').forEach(chip => chip.classList.remove('selected'));
-  if (!couponId) {
-    document.querySelector('#couponChoices .sku-chip').classList.add('selected');
+// 切换某张券的选中状态（多选叠加）
+function toggleCoupon(couponId) {
+  const idx = selectedCouponIds.indexOf(couponId);
+  if (idx >= 0) {
+    selectedCouponIds.splice(idx, 1);
   } else {
-    event.target.classList.add('selected');
+    selectedCouponIds.push(couponId);
   }
+  // 更新 UI 选中状态
+  document.querySelectorAll('#couponChoices .sku-chip[data-coupon-id]').forEach(chip => {
+    chip.classList.toggle('selected', selectedCouponIds.includes(chip.dataset.couponId));
+  });
+  // "不使用"按钮：有选中的券时取消其高亮
+  const noneChip = document.querySelector('#couponChoices .sku-chip:not([data-coupon-id])');
+  if (noneChip) noneChip.classList.toggle('selected', selectedCouponIds.length === 0);
+  const total = cart.reduce((s,c) => s + c.price * c.qty, 0);
+  updateCheckoutTotal(total);
+}
+
+// 清空所有已选优惠券
+function clearAllCoupons() {
+  selectedCouponIds = [];
+  selectedCouponId = null;
+  document.querySelectorAll('#couponChoices .sku-chip[data-coupon-id]').forEach(chip => chip.classList.remove('selected'));
+  const noneChip = document.querySelector('#couponChoices .sku-chip:not([data-coupon-id])');
+  if (noneChip) noneChip.classList.add('selected');
+  const total = cart.reduce((s,c) => s + c.price * c.qty, 0);
+  updateCheckoutTotal(total);
+}
+
+// 兼容旧调用
+function selectCoupon(couponId) {
+  if (!couponId) { clearAllCoupons(); return; }
+  // 单选模式：先清空再选一张
+  selectedCouponIds = [couponId];
+  document.querySelectorAll('#couponChoices .sku-chip[data-coupon-id]').forEach(chip => {
+    chip.classList.toggle('selected', chip.dataset.couponId === couponId);
+  });
+  const noneChip = document.querySelector('#couponChoices .sku-chip:not([data-coupon-id])');
+  if (noneChip) noneChip.classList.remove('selected');
   const total = cart.reduce((s,c) => s + c.price * c.qty, 0);
   updateCheckoutTotal(total);
 }
 
 function updateCheckoutTotal(total) {
   let discount = 0;
-  if (selectedCouponId) {
-    const c = coupons.find(cp => cp.id === selectedCouponId);
-    if (c) discount = c.value;
-  }
+  // 累加所有选中券的优惠金额
+  selectedCouponIds.forEach(id => {
+    const c = coupons.find(cp => cp.id === id);
+    if (c) discount += c.value;
+  });
+  // 优惠不能超过订单金额
+  discount = Math.min(discount, total);
   const finalTotal = Math.max(0, total - discount);
   document.getElementById('checkoutTotal').textContent = '$' + finalTotal.toFixed(2);
   document.getElementById('couponDiscount').textContent = discount > 0 ? `(已减 $${discount.toFixed(2)})` : '';
@@ -1518,14 +1554,17 @@ async function submitOrder() {
   const btn = event.target.closest('button');
   if (btn) { btn.disabled = true; btn.textContent = '提交中...'; }
 
-  // 计算优惠券
+  // 计算优惠券（支持多张叠加）
   let couponApplied = null;
   let discountAmount = 0;
-  if (selectedCouponId) {
-    const c = coupons.find(cp => cp.id === selectedCouponId);
-    if (c) {
-      couponApplied = { id: c.id, value: c.value };
-      discountAmount = c.value;
+  if (selectedCouponIds.length > 0) {
+    const appliedCoupons = selectedCouponIds.map(id => {
+      const c = coupons.find(cp => cp.id === id);
+      return c ? { id: c.id, value: c.value } : null;
+    }).filter(Boolean);
+    if (appliedCoupons.length > 0) {
+      discountAmount = Math.min(appliedCoupons.reduce((s,c) => s + c.value, 0), subtotal);
+      couponApplied = appliedCoupons; // 数组：[{id, value}, ...]
     }
   }
   const subtotal = cart.reduce((s,c) => s + c.price * c.qty, 0);
@@ -1588,14 +1627,18 @@ async function submitOrder() {
     saveMyOrderIds();
   }
 
-  // 作废已使用的优惠券
-  if (couponApplied) {
-    coupons = coupons.filter(c => c.id !== couponApplied.id);
-    usedCoupons.unshift({ ...couponApplied, usedAt: new Date().toISOString() });
-    if (usedCoupons.length > 50) usedCoupons = usedCoupons.slice(0, 50);
+  // 作废已使用的优惠券（支持多张）
+  if (couponApplied && Array.isArray(couponApplied) && couponApplied.length > 0) {
+    const appliedIds = couponApplied.map(c => c.id);
+    coupons = coupons.filter(c => !appliedIds.includes(c.id));
+    couponApplied.forEach(cp => {
+      usedCoupons.unshift({ ...cp, usedAt: new Date().toISOString() });
+    });
+    if (usedCoupons.length > 100) usedCoupons = usedCoupons.slice(0, 100);
     saveCoupons();
   }
   selectedCouponId = null;
+  selectedCouponIds = [];
 
   if (btn) { btn.disabled = false; btn.textContent = '提交订单'; }
 
@@ -1679,6 +1722,7 @@ async function renderMyOrders() {
           </div>
         `).join('')}
       </div>
+      ${o.discount > 0 ? `<div style="font-size:12px;color:var(--success);margin-top:4px;">🎟️ 优惠券抵扣 -$${o.discount.toFixed(2)}</div>` : ''}
       <div class="oc-total">
         <span>合计</span>
         <span>$${o.total.toFixed(2)}</span>
@@ -1688,22 +1732,42 @@ async function renderMyOrders() {
 }
 
 // ============ 顾客端：优惠券系统 ============
-const COUPON_THRESHOLD = 100; // 满100 CAD
+const COUPON_THRESHOLD = 100; // 每100 CAD发一张券
 const COUPON_VALUE = 8;       // 减8 CAD
 const STORAGE_KEY_COUPONS = 'pet_bowtie_coupons';
 const STORAGE_KEY_USED_COUPONS = 'pet_bowtie_used_coupons';
 // 记录已计入优惠券的已完成订单 ID，防止重复计数
 const STORAGE_KEY_COUNTED_ORDERS = 'pet_bowtie_counted_orders';
+// 历史累计发出的券总数（含已使用），用于判断是否该发新券
+const STORAGE_KEY_TOTAL_ISSUED = 'pet_bowtie_total_issued';
+// 历史累计消费总额（已完成订单实付金额），不封顶
+const STORAGE_KEY_TOTAL_SPEND = 'pet_bowtie_total_spend';
 
 let coupons = JSON.parse(localStorage.getItem(STORAGE_KEY_COUPONS) || '[]');         // 可用的优惠券
 let usedCoupons = JSON.parse(localStorage.getItem(STORAGE_KEY_USED_COUPONS) || '[]'); // 已使用的（作废的）
 let countedOrderIds = JSON.parse(localStorage.getItem(STORAGE_KEY_COUNTED_ORDERS) || '[]'); // 已计入的已完成订单
-let selectedCouponId = null; // 结算时选中的优惠券
+let selectedCouponId = null; // 结算时选中的优惠券（单张，兼容旧逻辑）
+let selectedCouponIds = []; // 结算时选中的优惠券（多张叠加）
+
+// 旧数据迁移：把旧的 pendingSpend 转为 totalSpend + issuedCount
+// 旧规则每满100发券并扣100，所以 totalSpend = pendingSpend + issuedCount*100
+// issuedCount = 当前可用券 + 已使用券数
+(function migrateCouponData() {
+  if (localStorage.getItem(STORAGE_KEY_TOTAL_SPEND) === null) {
+    const oldPending = parseFloat(localStorage.getItem('pet_bowtie_pending_spend') || '0');
+    const issuedCount = coupons.length + usedCoupons.length;
+    const totalSpend = oldPending + issuedCount * COUPON_THRESHOLD;
+    localStorage.setItem(STORAGE_KEY_TOTAL_SPEND, JSON.stringify(totalSpend));
+    localStorage.setItem(STORAGE_KEY_TOTAL_ISSUED, JSON.stringify(issuedCount));
+    localStorage.removeItem('pet_bowtie_pending_spend');
+  }
+})();
 
 function saveCoupons() {
   localStorage.setItem(STORAGE_KEY_COUPONS, JSON.stringify(coupons));
   localStorage.setItem(STORAGE_KEY_USED_COUPONS, JSON.stringify(usedCoupons));
   localStorage.setItem(STORAGE_KEY_COUNTED_ORDERS, JSON.stringify(countedOrderIds));
+  // totalSpend 和 issuedCount 在 checkAndIssueCoupons 中直接写入，这里不重复
   updateCouponBadge();
 }
 
@@ -1720,6 +1784,12 @@ function updateCouponBadge() {
 }
 
 // 检查已完成的订单，累计消费发放优惠券
+// 规则：累计消费每满 $100 发一张 $8 券，不封顶；
+// 券用掉后不扣减累计消费，需要再满 $100 才发新券。
+// 实现：totalSpend = 所有已完成订单实付总额；
+//      issuedCount = 历史累计发出的券数（含已使用）；
+//      应有券数 = floor(totalSpend / 100)；
+//      当 issuedCount < 应有券数 时，补发差额。
 async function checkAndIssueCoupons() {
   if (myOrderIds.length === 0) return;
   const cloudOrders = await fetchCloudData('orders.json');
@@ -1727,28 +1797,35 @@ async function checkAndIssueCoupons() {
   const myDoneOrders = cloudOrders.filter(o =>
     myOrderIds.includes(o.id) && o.status === 'done' && !countedOrderIds.includes(o.id)
   );
-  if (myDoneOrders.length === 0) return;
-  // 把新完成的订单计入
-  let newSpent = 0;
+
+  // 累计消费总额（从 localStorage 读取，保证只增不减）
+  let totalSpend = parseFloat(localStorage.getItem(STORAGE_KEY_TOTAL_SPEND) || '0');
+  // 历史累计发出的券数（含已使用，只增不减）
+  let issuedCount = parseInt(localStorage.getItem(STORAGE_KEY_TOTAL_ISSUED) || '0');
+
+  // 把新完成的订单计入累计消费
   myDoneOrders.forEach(o => {
     countedOrderIds.push(o.id);
-    // 如果该订单使用了优惠券，减去优惠金额，按实际消费计入
-    const spent = o.couponApplied ? Math.max(0, o.total) : o.total;
-    newSpent += spent;
+    // 按实付金额计入（total 已是减去优惠后的金额）
+    const spent = o.total != null ? parseFloat(o.total) : 0;
+    totalSpend += Math.max(0, spent);
   });
-  // 累计消费，每满 COUPON_THRESHOLD 发一张
-  let pendingSpend = JSON.parse(localStorage.getItem('pet_bowtie_pending_spend') || '0');
-  pendingSpend += newSpent;
-  while (pendingSpend >= COUPON_THRESHOLD) {
-    pendingSpend -= COUPON_THRESHOLD;
+
+  // 计算当前应有多少张券（含已使用的）
+  const deservedCount = Math.floor(totalSpend / COUPON_THRESHOLD);
+  // 补发差额
+  while (issuedCount < deservedCount) {
     coupons.push({
-      id: 'CPN' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2,5).toUpperCase(),
+      id: 'CPN' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2,5).toUpperCase() + issuedCount,
       value: COUPON_VALUE,
       issuedAt: new Date().toISOString(),
       status: 'available'
     });
+    issuedCount++;
   }
-  localStorage.setItem('pet_bowtie_pending_spend', JSON.stringify(pendingSpend));
+
+  localStorage.setItem(STORAGE_KEY_TOTAL_SPEND, JSON.stringify(totalSpend));
+  localStorage.setItem(STORAGE_KEY_TOTAL_ISSUED, JSON.stringify(issuedCount));
   saveCoupons();
 }
 
@@ -1765,18 +1842,24 @@ function closeCoupons() {
 async function renderCoupons() {
   // 先检查是否有新完成的订单可发券
   await checkAndIssueCoupons();
-  let pendingSpend = JSON.parse(localStorage.getItem('pet_bowtie_pending_spend') || '0');
+  const totalSpend = parseFloat(localStorage.getItem(STORAGE_KEY_TOTAL_SPEND) || '0');
+  const issuedCount = parseInt(localStorage.getItem(STORAGE_KEY_TOTAL_ISSUED) || '0');
   const body = document.getElementById('couponsBody');
   let html = '';
-  // 进度条
-  const progress = Math.min(100, (pendingSpend / COUPON_THRESHOLD * 100));
+  // 进度条：显示距离下一张券还差多少
+  // 已发出的券占用 issuedCount * 100 的额度，下一个档位是 (issuedCount+1) * 100
+  const nextThreshold = (issuedCount + 1) * COUPON_THRESHOLD;
+  const currentProgress = totalSpend - issuedCount * COUPON_THRESHOLD; // 0~100
+  const progressPct = Math.min(100, Math.max(0, currentProgress / COUPON_THRESHOLD * 100));
+  const remaining = Math.max(0, COUPON_THRESHOLD - currentProgress);
   html += `<div style="background:var(--panel);border-radius:12px;padding:16px;margin-bottom:16px;box-shadow:var(--shadow);">
     <div style="font-size:13px;color:var(--muted);margin-bottom:8px;">累计消费（已完成订单）</div>
-    <div style="font-size:24px;font-weight:700;color:var(--primary-dark);">$${pendingSpend.toFixed(2)} <span style="font-size:14px;color:var(--muted);font-weight:400;">/ $${COUPON_THRESHOLD}</span></div>
+    <div style="font-size:24px;font-weight:700;color:var(--primary-dark);">$${totalSpend.toFixed(2)}</div>
     <div style="background:var(--bg);border-radius:8px;height:8px;margin-top:8px;overflow:hidden;">
-      <div style="background:var(--primary);height:100%;width:${progress}%;border-radius:8px;transition:width 0.3s;"></div>
+      <div style="background:var(--primary);height:100%;width:${progressPct}%;border-radius:8px;transition:width 0.3s;"></div>
     </div>
-    <div style="font-size:12px;color:var(--muted);margin-top:6px;">满 $${COUPON_THRESHOLD} 自动获得一张 $${COUPON_VALUE} 优惠券</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:6px;">再消费 <strong style="color:var(--primary-dark);">$${remaining.toFixed(2)}</strong> 即可获得第 ${issuedCount + 1} 张优惠券</div>
+    <div style="font-size:11px;color:var(--muted);margin-top:4px;">每满 $${COUPON_THRESHOLD} 自动获得一张 $${COUPON_VALUE} 优惠券，可叠加使用，无上限</div>
   </div>`;
   // 可用优惠券
   if (coupons.length > 0) {
@@ -1843,6 +1926,7 @@ function renderOrders() {
           </div>
         `).join('')}
       </div>
+      ${o.discount > 0 ? `<div style="font-size:12px;color:var(--success);margin-top:4px;">🎟️ 优惠券抵扣 -$${o.discount.toFixed(2)}</div>` : ''}
       <div class="oc-total">
         <span>合计</span>
         <span>$${o.total.toFixed(2)}</span>
